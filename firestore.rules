@@ -1,13 +1,8 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Global catch-all default deny
     match /{document=**} {
       allow read, write: if false;
-    }
-
-    function isValidId(id) {
-      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
     }
 
     function isSignedIn() {
@@ -19,15 +14,14 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow read: if isOwner(userId);
-      allow create: if isOwner(userId) && request.resource.data.uid == userId && request.resource.data.termsAccepted == true;
-      allow update: if isOwner(userId) && request.resource.data.uid == resource.data.uid;
-      allow delete: if isOwner(userId);
+      allow read, write: if isOwner(userId);
 
+      // Allow any authenticated user to create a referral record under a tenant's referrals subcollection
+      // provided referrerUid != newly registered user's uid (no self referral)
       match /referrals/{referralId} {
-        allow read, list: if isOwner(userId) && isValidId(userId);
-        allow create: if isOwner(userId) && isValidId(userId) && request.resource.data.userId == userId;
-        allow update, delete: if isOwner(userId) && isValidId(userId);
+        allow read, list: if isOwner(userId);
+        allow create: if isSignedIn() && request.resource.data.referredUid == request.auth.uid && request.auth.uid != userId;
+        allow update, delete: if isOwner(userId);
       }
     }
   }

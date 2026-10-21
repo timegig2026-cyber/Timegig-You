@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { BottomMenuBar } from './components/BottomMenuBar';
 import { AuthScreen } from './components/AuthScreen';
-import { Copy, Check, Users, Link2, UserCheck, UserPlus, ExternalLink, ShieldCheck, RefreshCw, UserCheck2 } from 'lucide-react';
+import { Copy, Check, Users, Link2, UserCheck, UserPlus, ExternalLink, ShieldCheck, AlertCircle } from 'lucide-react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { collection, addDoc, getDocs, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
+import { collection, onSnapshot, doc, getDoc, setDoc } from 'firebase/firestore';
 
 interface Referral {
   id: string;
@@ -13,37 +13,67 @@ interface Referral {
   avatar: string;
   date: string;
   status: 'Signed' | 'Pending';
-  userId: string;
+  referredUid: string;
 }
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'tenant' | 'auth'>('tenant');
   const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
   const [authLoading, setAuthLoading] = useState<boolean>(true);
-  const [isReferralRegistrationMode, setIsReferralRegistrationMode] = useState<boolean>(false);
 
   const [copied, setCopied] = useState<boolean>(false);
   const [joinedUsers, setJoinedUsers] = useState<Referral[]>([]);
   const [loadingReferrals, setLoadingReferrals] = useState<boolean>(false);
-  const [resetting, setResetting] = useState<boolean>(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Tenant Link URL with action parameter pointing to referral signup mode
+  // Capture ?ref=UID from URL hash or search params
+  const [urlReferralCode, setUrlReferralCode] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handleUrlParams = () => {
+      const hash = window.location.hash;
+      const search = window.location.search;
+      let refCode: string | null = null;
+
+      if (hash.includes('ref=')) {
+        const parts = hash.split('ref=');
+        if (parts[1]) {
+          refCode = parts[1].split('&')[0];
+        }
+      } else if (search.includes('ref=')) {
+        const params = new URLSearchParams(search);
+        refCode = params.get('ref');
+      }
+
+      if (refCode) {
+        setUrlReferralCode(refCode);
+        // If there's a ref code in URL and user is not logged in, prompt Auth screen
+        setActiveTab('auth');
+      }
+    };
+
+    handleUrlParams();
+    window.addEventListener('hashchange', handleUrlParams);
+    return () => window.removeEventListener('hashchange', handleUrlParams);
+  }, []);
+
+  // Tenant Link URL using current origin and user's own UID
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  const tenantLink = `${currentOrigin}/#ref=tnt-84920&mode=register_referral`;
+  const tenantLink = currentUser ? `${currentOrigin}/#ref=${currentUser.uid}` : `${currentOrigin}/`;
 
   // Listen to Firebase Auth state
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, (user) => {
       setCurrentUser(user);
       setAuthLoading(false);
-      if (!user) {
+      if (!user && !urlReferralCode) {
         setActiveTab('auth');
       }
     });
     return () => unsubscribe();
-  }, []);
+  }, [urlReferralCode]);
 
-  // Fetch referrals from Firestore for current user
+  // Fetch referrals from Firestore in real-time for current authenticated user
   useEffect(() => {
     if (!currentUser) {
       setJoinedUsers([]);
@@ -51,7 +81,9 @@ export default function App() {
     }
 
     setLoadingReferrals(true);
+    setErrorMsg(null);
     const refCol = collection(db, 'users', currentUser.uid, 'referrals');
+
     const unsubscribe = onSnapshot(
       refCol,
       (snapshot) => {
@@ -64,6 +96,7 @@ export default function App() {
       },
       (error) => {
         console.error('Error fetching referrals:', error);
+        setErrorMsg('Failed to load referrals due to permission or connection error.');
         setLoadingReferrals(false);
       }
     );
@@ -71,58 +104,12 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Handle clicking tenant link: simulates a referred user registering a separate account and appearing in the list
-  const handleTenantLinkOpen = async () => {
-    if (!currentUser) {
-      // If not logged in, prompt to register via referral link
-      setIsReferralRegistrationMode(true);
+  // Simulate self-test referral link registration
+  const handleTestLinkAction = () => {
+    if (currentUser) {
+      // If logged in, set urlReferralCode to self or test code
+      setUrlReferralCode(currentUser.uid);
       setActiveTab('auth');
-      return;
-    }
-
-    setResetting(true);
-    try {
-      const names = ['Taylor Vance', 'Jordan Lee', 'Morgan Blake', 'Casey Sterling', 'Alex Rivera'];
-      const randomName = names[Math.floor(Math.random() * names.length)];
-      const username = randomName.toLowerCase().replace(/\s+/g, '');
-
-      const newRef = {
-        userId: currentUser.uid,
-        name: randomName,
-        email: `${username}@separate-referral-account.net`,
-        avatar: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 999999)}?w=150&auto=format&fit=crop&q=80`,
-        date: 'Just now (Separate Account)',
-        status: 'Pending' as const,
-      };
-
-      await addDoc(collection(db, 'users', currentUser.uid, 'referrals'), newRef);
-      setResetting(false);
-      setCopied(false);
-    } catch (err) {
-      console.error('Error adding referral account:', err);
-      setResetting(false);
-    }
-  };
-
-  const handleSimulateJoin = async () => {
-    if (!currentUser) return;
-    const names = ['Alex Mercer', 'Samantha Reed', 'David Chen', 'Elena Rostova', 'Marcus Vance', 'Priya Patel'];
-    const randomName = names[Math.floor(Math.random() * names.length)];
-    const username = randomName.toLowerCase().replace(/\s+/g, '');
-
-    const newRef = {
-      userId: currentUser.uid,
-      name: randomName,
-      email: `${username}@separate-account.io`,
-      avatar: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 999999)}?w=150&auto=format&fit=crop&q=80`,
-      date: 'Just now',
-      status: 'Pending' as const,
-    };
-
-    try {
-      await addDoc(collection(db, 'users', currentUser.uid, 'referrals'), newRef);
-    } catch (err) {
-      console.error('Error adding referral:', err);
     }
   };
 
@@ -156,30 +143,21 @@ export default function App() {
             currentUser={currentUser}
             onAuthSuccess={() => {
               setActiveTab('tenant');
-              setIsReferralRegistrationMode(false);
+              setUrlReferralCode(null);
+              // Clear ref from URL without reloading
+              if (window.location.hash.includes('ref=')) {
+                window.location.hash = '';
+              }
             }}
-            isReferralRegistration={isReferralRegistrationMode}
-            onToggleReferralMode={setIsReferralRegistrationMode}
+            referralCodeFromUrl={urlReferralCode}
           />
         ) : (
           <div className="space-y-6 animate-in fade-in duration-200">
-            {/* Header & Simulation Triggers */}
+            {/* Header */}
             <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <h1 className="text-lg font-bold text-slate-900">Tenant Portal</h1>
                 <p className="text-xs text-slate-500">Authenticated Resident: {currentUser.email}</p>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  type="button"
-                  onClick={handleTenantLinkOpen}
-                  disabled={resetting}
-                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors text-xs font-semibold flex items-center gap-1.5 shadow-xs disabled:opacity-50"
-                  title="Simulate a referred user registering a separate account via tenant link"
-                >
-                  <UserCheck2 className="w-3.5 h-3.5" />
-                  <span>{resetting ? 'Registering...' : 'Simulate Referral Account Registration'}</span>
-                </button>
               </div>
             </div>
 
@@ -187,10 +165,10 @@ export default function App() {
             <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-xs">
               <div className="flex items-center gap-2 mb-2">
                 <Link2 className="w-4 h-4 text-indigo-600" />
-                <h2 className="text-sm font-semibold text-slate-900">Tenant Link (Separate Account Registration)</h2>
+                <h2 className="text-sm font-semibold text-slate-900">Your Unique Tenant Link</h2>
               </div>
               <p className="text-xs text-slate-500 mb-3">
-                Share this referral link with prospective tenants. When they open this link, they can register with their own email and password for a <strong className="text-slate-800">separate account</strong>, automatically linking their registration to your total referrals.
+                Share this referral link. When prospective tenants register through this link, their profile will appear directly in your dashboard below in real time:
               </p>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <input
@@ -200,19 +178,15 @@ export default function App() {
                   className="flex-1 px-3 py-2 text-xs sm:text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-hidden"
                 />
                 <div className="flex items-center gap-2">
-                  <a
-                    href={tenantLink}
-                    onClick={(e) => {
-                      e.preventDefault();
-                      setIsReferralRegistrationMode(true);
-                      setActiveTab('auth');
-                    }}
+                  <button
+                    type="button"
+                    onClick={handleTestLinkAction}
                     className="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 transition-colors flex items-center gap-1 shrink-0 justify-center"
-                    title="Open referral signup flow"
+                    title="Simulate registration flow with referral code"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Test Link Signup</span>
-                  </a>
+                    <span>Test Link</span>
+                  </button>
                   <button
                     type="button"
                     onClick={handleCopy}
@@ -241,7 +215,7 @@ export default function App() {
                   <Users className="w-4 h-4 text-indigo-600" />
                   <div>
                     <h2 className="text-sm font-semibold text-slate-900">Total Referrals</h2>
-                    <p className="text-[11px] text-slate-500">Users with separate registered accounts</p>
+                    <p className="text-[11px] text-slate-500">Live count from Firestore authorized records</p>
                   </div>
                 </div>
                 <span className="text-2xl font-bold font-mono text-indigo-600 tabular-nums">
@@ -252,20 +226,27 @@ export default function App() {
               {/* Referrals User Details List */}
               <div className="mt-4">
                 <div className="text-xs font-medium text-slate-500 mb-2 flex items-center justify-between">
-                  <span>Referred User Accounts</span>
+                  <span>Registered Referrals</span>
                   <span className="text-[11px] text-indigo-600 flex items-center gap-1">
-                    <ShieldCheck className="w-3 h-3 text-emerald-600" /> Firebase Auth
+                    <ShieldCheck className="w-3 h-3 text-emerald-600" /> Real-time Listener Active
                   </span>
                 </div>
 
+                {errorMsg && (
+                  <div className="mb-3 p-3 bg-rose-50 border border-rose-200 text-rose-700 text-xs rounded-xl flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0" />
+                    <span>{errorMsg}</span>
+                  </div>
+                )}
+
                 {loadingReferrals ? (
-                  <div className="py-8 text-center text-xs text-slate-400">Loading accounts...</div>
+                  <div className="py-8 text-center text-xs text-slate-400">Loading authorized referrals...</div>
                 ) : joinedUsers.length === 0 ? (
                   <div className="py-10 text-center">
                     <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                    <p className="text-xs font-medium text-slate-700">No referred accounts yet</p>
+                    <p className="text-xs font-medium text-slate-700">No referrals yet</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Click "Simulate Referral Account Registration" above or test the link signup.
+                      Share your tenant link above to invite prospective tenants.
                     </p>
                   </div>
                 ) : (
@@ -280,7 +261,7 @@ export default function App() {
                           />
                           <div>
                             <div className="font-semibold text-slate-900">{ref.name}</div>
-                            <div className="text-slate-500 text-[11px]">{ref.email} · Separate Account · {ref.date}</div>
+                            <div className="text-slate-500 text-[11px]">{ref.email} · Registered {ref.date}</div>
                           </div>
                         </div>
                         <span

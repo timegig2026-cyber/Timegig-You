@@ -7,20 +7,18 @@ import {
   signOut,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, setDoc } from 'firebase/firestore';
+import { doc, setDoc, collection, addDoc } from 'firebase/firestore';
 
 interface AuthScreenProps {
   currentUser: FirebaseUser | null;
   onAuthSuccess: () => void;
-  isReferralRegistration?: boolean;
-  onToggleReferralMode?: (isRef: boolean) => void;
+  referralCodeFromUrl?: string | null;
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({
   currentUser,
   onAuthSuccess,
-  isReferralRegistration = false,
-  onToggleReferralMode,
+  referralCodeFromUrl,
 }) => {
   const [isRegister, setIsRegister] = useState<boolean>(true);
   const [email, setEmail] = useState('');
@@ -46,18 +44,39 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
     setLoading(true);
     try {
       if (isRegister) {
-        // Create user account with Firebase Auth
+        // 1. Create Firebase Auth user
         const cred = await createUserWithEmailAndPassword(auth, email, password);
-        // Save user profile & role to Firestore
-        await setDoc(doc(db, 'users', cred.user.uid), {
-          uid: cred.user.uid,
-          email: cred.user.email,
-          role: isReferralRegistration ? 'referred_user' : 'tenant',
+        const newUser = cred.user;
+
+        // 2. Save user profile at users/{uid}
+        await setDoc(doc(db, 'users', newUser.uid), {
+          uid: newUser.uid,
+          email: newUser.email,
+          referredBy: referralCodeFromUrl || null,
           termsAccepted: true,
           createdAt: new Date().toISOString(),
         });
+
+        // 3. If there is a valid referralCodeFromUrl (referrer's UID), write referral record to users/{referrerUid}/referrals/{newUserUid}
+        if (referralCodeFromUrl) {
+          if (referralCodeFromUrl === newUser.uid) {
+            throw new Error('You cannot refer yourself.');
+          }
+
+          const referralRecord = {
+            referredUid: newUser.uid,
+            name: email.split('@')[0],
+            email: newUser.email,
+            avatar: `https://api.dicebear.com/7.x/avataaars/svg?seed=${newUser.uid}`,
+            date: new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }),
+            status: 'Pending' as const,
+            createdAt: new Date().toISOString(),
+          };
+
+          await setDoc(doc(db, 'users', referralCodeFromUrl, 'referrals', newUser.uid), referralRecord);
+        }
       } else {
-        // Login existing user
+        // Sign in existing user
         await signInWithEmailAndPassword(auth, email, password);
       }
       onAuthSuccess();
@@ -97,7 +116,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-600 text-left space-y-1">
           <div className="flex items-center gap-1.5 font-semibold text-slate-800">
             <Shield className="w-4 h-4 text-emerald-600" />
-            <span>Separate Account Active</span>
+            <span>Secure Account Active</span>
           </div>
           <p>You are logged into your independent portal account.</p>
         </div>
@@ -116,20 +135,20 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
   return (
     <div className="max-w-md mx-auto bg-white border border-slate-200 rounded-2xl p-6 shadow-xs my-6">
       <div className="text-center mb-6">
-        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-semibold mb-2 border border-indigo-100">
-          {isReferralRegistration ? <UserCheck className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
-          <span>{isReferralRegistration ? 'Referred User Registration' : 'Resident Portal'}</span>
-        </div>
+        {referralCodeFromUrl && (
+          <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-semibold mb-2 border border-indigo-100">
+            <UserCheck className="w-3 h-3" />
+            <span>Registering via Tenant Referral Link</span>
+          </div>
+        )}
         <h2 className="text-lg font-bold text-slate-900">
-          {isRegister
-            ? isReferralRegistration
-              ? 'Create Referred User Account'
-              : 'Create Resident Account'
-            : 'Sign In to Account'}
+          {isRegister ? 'Create Account' : 'Sign In to Account'}
         </h2>
         <p className="text-xs text-slate-500 mt-1">
           {isRegister
-            ? 'Register with email & password and accept terms for a separate account'
+            ? referralCodeFromUrl
+              ? 'Register with your email and password to accept the referral'
+              : 'Register with email & password and accept terms'
             : 'Access your account dashboard'}
         </p>
       </div>
@@ -149,7 +168,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             <input
               type="email"
               required
-              placeholder={isReferralRegistration ? 'referred.user@example.com' : 'resident@example.com'}
+              placeholder="user@example.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full pl-9 pr-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
@@ -183,7 +202,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
               className="mt-0.5 w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
             />
             <label htmlFor="terms" className="text-xs text-slate-600 leading-relaxed cursor-pointer">
-              I accept the <strong className="text-slate-900">Terms and Conditions</strong> for this separate account.
+              I accept the <strong className="text-slate-900">Terms and Conditions</strong>.
             </label>
           </div>
         )}
@@ -198,7 +217,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
           ) : isRegister ? (
             <>
               <UserPlus className="w-4 h-4" />
-              <span>{isReferralRegistration ? 'Register Referred Account' : 'Register Account'}</span>
+              <span>Register Account</span>
             </>
           ) : (
             <>
@@ -209,7 +228,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
         </button>
       </form>
 
-      <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
+      <div className="mt-5 pt-4 border-t border-slate-100 text-center">
         <button
           type="button"
           onClick={() => {
@@ -222,16 +241,6 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({
             ? 'Already have an account? Sign In'
             : "Don't have an account? Register"}
         </button>
-
-        {onToggleReferralMode && (
-          <button
-            type="button"
-            onClick={() => onToggleReferralMode(!isReferralRegistration)}
-            className="text-xs font-medium text-slate-500 hover:text-slate-800 underline transition-colors"
-          >
-            {isReferralRegistration ? 'Switch to Resident' : 'Register via Link'}
-          </button>
-        )}
       </div>
     </div>
   );
