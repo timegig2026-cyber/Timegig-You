@@ -16,12 +16,15 @@ service cloud.firestore {
     match /users/{userId} {
       allow read, write: if isOwner(userId);
 
-      // Allow any authenticated user to create a referral record under a tenant's referrals subcollection
-      // provided referrerUid != newly registered user's uid (no self referral)
+      // Allow authenticated referred users to record their referral under the referrer's subcollection
+      // or the referrer themselves to manage their referrals
       match /referrals/{referralId} {
         allow read, list: if isOwner(userId);
-        allow create: if isSignedIn() && request.resource.data.referredUid == request.auth.uid && request.auth.uid != userId;
-        allow update, delete: if isOwner(userId);
+        allow create, update: if isSignedIn() && (
+          (request.resource.data.referredUid == request.auth.uid && request.auth.uid != userId) ||
+          isOwner(userId)
+        );
+        allow delete: if isOwner(userId);
       }
     }
   }
