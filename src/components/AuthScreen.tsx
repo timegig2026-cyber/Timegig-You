@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Mail, Lock, CheckCircle2, AlertCircle, LogIn, UserPlus, Shield, ArrowRight } from 'lucide-react';
+import { Mail, Lock, CheckCircle2, AlertCircle, LogIn, UserPlus, Shield, UserCheck } from 'lucide-react';
 import { auth, db } from '../firebase';
 import {
   createUserWithEmailAndPassword,
@@ -7,14 +7,21 @@ import {
   signOut,
   User as FirebaseUser,
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc } from 'firebase/firestore';
 
 interface AuthScreenProps {
   currentUser: FirebaseUser | null;
   onAuthSuccess: () => void;
+  isReferralRegistration?: boolean;
+  onToggleReferralMode?: (isRef: boolean) => void;
 }
 
-export const AuthScreen: React.FC<AuthScreenProps> = ({ currentUser, onAuthSuccess }) => {
+export const AuthScreen: React.FC<AuthScreenProps> = ({
+  currentUser,
+  onAuthSuccess,
+  isReferralRegistration = false,
+  onToggleReferralMode,
+}) => {
   const [isRegister, setIsRegister] = useState<boolean>(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -39,12 +46,13 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ currentUser, onAuthSucce
     setLoading(true);
     try {
       if (isRegister) {
-        // Create user with Firebase Auth
+        // Create user account with Firebase Auth
         const cred = await createUserWithEmailAndPassword(auth, email, password);
-        // Save user profile & terms acceptance to Firestore
+        // Save user profile & role to Firestore
         await setDoc(doc(db, 'users', cred.user.uid), {
           uid: cred.user.uid,
           email: cred.user.email,
+          role: isReferralRegistration ? 'referred_user' : 'tenant',
           termsAccepted: true,
           createdAt: new Date().toISOString(),
         });
@@ -89,9 +97,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ currentUser, onAuthSucce
         <div className="p-3 bg-slate-50 rounded-xl text-xs text-slate-600 text-left space-y-1">
           <div className="flex items-center gap-1.5 font-semibold text-slate-800">
             <Shield className="w-4 h-4 text-emerald-600" />
-            <span>Account Verified &amp; Protected</span>
+            <span>Separate Account Active</span>
           </div>
-          <p>You have full access to your tenant referral link and total referrals.</p>
+          <p>You are logged into your independent portal account.</p>
         </div>
 
         <button
@@ -108,13 +116,21 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ currentUser, onAuthSucce
   return (
     <div className="max-w-md mx-auto bg-white border border-slate-200 rounded-2xl p-6 shadow-xs my-6">
       <div className="text-center mb-6">
+        <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-indigo-50 text-indigo-700 text-[11px] font-semibold mb-2 border border-indigo-100">
+          {isReferralRegistration ? <UserCheck className="w-3 h-3" /> : <Shield className="w-3 h-3" />}
+          <span>{isReferralRegistration ? 'Referred User Registration' : 'Resident Portal'}</span>
+        </div>
         <h2 className="text-lg font-bold text-slate-900">
-          {isRegister ? 'Create Resident Account' : 'Resident Sign In'}
+          {isRegister
+            ? isReferralRegistration
+              ? 'Create Referred User Account'
+              : 'Create Resident Account'
+            : 'Sign In to Account'}
         </h2>
         <p className="text-xs text-slate-500 mt-1">
           {isRegister
-            ? 'Register with email & password and accept terms to use the app'
-            : 'Access your tenant portal and referrals'}
+            ? 'Register with email & password and accept terms for a separate account'
+            : 'Access your account dashboard'}
         </p>
       </div>
 
@@ -133,7 +149,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ currentUser, onAuthSucce
             <input
               type="email"
               required
-              placeholder="resident@example.com"
+              placeholder={isReferralRegistration ? 'referred.user@example.com' : 'resident@example.com'}
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full pl-9 pr-3 py-2.5 text-xs sm:text-sm rounded-xl border border-slate-300 focus:outline-hidden focus:ring-2 focus:ring-indigo-500"
@@ -167,7 +183,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ currentUser, onAuthSucce
               className="mt-0.5 w-4 h-4 text-indigo-600 rounded border-slate-300 focus:ring-indigo-500"
             />
             <label htmlFor="terms" className="text-xs text-slate-600 leading-relaxed cursor-pointer">
-              I accept the <strong className="text-slate-900">Terms and Conditions</strong> and resident community guidelines.
+              I accept the <strong className="text-slate-900">Terms and Conditions</strong> for this separate account.
             </label>
           </div>
         )}
@@ -182,7 +198,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ currentUser, onAuthSucce
           ) : isRegister ? (
             <>
               <UserPlus className="w-4 h-4" />
-              <span>Register Account</span>
+              <span>{isReferralRegistration ? 'Register Referred Account' : 'Register Account'}</span>
             </>
           ) : (
             <>
@@ -193,7 +209,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ currentUser, onAuthSucce
         </button>
       </form>
 
-      <div className="mt-5 pt-4 border-t border-slate-100 text-center">
+      <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-between">
         <button
           type="button"
           onClick={() => {
@@ -204,8 +220,18 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ currentUser, onAuthSucce
         >
           {isRegister
             ? 'Already have an account? Sign In'
-            : "Don't have an account yet? Register"}
+            : "Don't have an account? Register"}
         </button>
+
+        {onToggleReferralMode && (
+          <button
+            type="button"
+            onClick={() => onToggleReferralMode(!isReferralRegistration)}
+            className="text-xs font-medium text-slate-500 hover:text-slate-800 underline transition-colors"
+          >
+            {isReferralRegistration ? 'Switch to Resident' : 'Register via Link'}
+          </button>
+        )}
       </div>
     </div>
   );
