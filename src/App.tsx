@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { BottomMenuBar } from './components/BottomMenuBar';
 import { AuthScreen } from './components/AuthScreen';
-import { Copy, Check, Users, Link2, UserCheck, UserPlus, ExternalLink, ShieldCheck, Lock } from 'lucide-react';
+import { Copy, Check, Users, Link2, UserCheck, UserPlus, ExternalLink, ShieldCheck, RefreshCw } from 'lucide-react';
 import { auth, db } from './firebase';
 import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
-import { collection, addDoc, getDocs, query, orderBy, onSnapshot } from 'firebase/firestore';
+import { collection, addDoc, getDocs, deleteDoc, doc, onSnapshot } from 'firebase/firestore';
 
 interface Referral {
   id: string;
@@ -24,10 +24,11 @@ export default function App() {
   const [copied, setCopied] = useState<boolean>(false);
   const [joinedUsers, setJoinedUsers] = useState<Referral[]>([]);
   const [loadingReferrals, setLoadingReferrals] = useState<boolean>(false);
+  const [resetting, setResetting] = useState<boolean>(false);
 
-  // Tenant Link URL
+  // Tenant Link URL with auto-reset trigger parameter
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
-  const tenantLink = `${currentOrigin}/#ref=tnt-84920`;
+  const tenantLink = `${currentOrigin}/#ref=tnt-84920&action=restart`;
 
   // Listen to Firebase Auth state
   useEffect(() => {
@@ -35,7 +36,6 @@ export default function App() {
       setCurrentUser(user);
       setAuthLoading(false);
       if (!user) {
-        // If user logs out, switch to auth tab
         setActiveTab('auth');
       }
     });
@@ -70,7 +70,38 @@ export default function App() {
     return () => unsubscribe();
   }, [currentUser]);
 
-  // Simulate a user joining through the tenant link (saves to Firestore)
+  // Handle joining through tenant link (starts every referral over / resets list and creates fresh start)
+  const handleTenantLinkJoin = async () => {
+    if (!currentUser) return;
+    setResetting(true);
+
+    try {
+      // 1. Clear existing referrals in Firestore so it starts over completely
+      const refCol = collection(db, 'users', currentUser.uid, 'referrals');
+      const snapshot = await getDocs(refCol);
+      const deletePromises = snapshot.docs.map((d) => deleteDoc(doc(db, 'users', currentUser.uid, 'referrals', d.id)));
+      await Promise.all(deletePromises);
+
+      // 2. Add the first fresh starting referral
+      const initialNewRef = {
+        userId: currentUser.uid,
+        name: 'Jordan Taylor',
+        email: 'jordan.taylor@prospect-tenant.io',
+        avatar: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?w=150&auto=format&fit=crop&q=80',
+        date: 'Just now (Restarted)',
+        status: 'Pending' as const,
+      };
+
+      await addDoc(refCol, initialNewRef);
+      setResetting(false);
+      setCopied(false);
+    } catch (err) {
+      console.error('Error resetting referrals on link join:', err);
+      setResetting(false);
+    }
+  };
+
+  // Additional simulation helper
   const handleSimulateJoin = async () => {
     if (!currentUser) return;
     const names = ['Alex Mercer', 'Samantha Reed', 'David Chen', 'Elena Rostova', 'Marcus Vance', 'Priya Patel'];
@@ -88,7 +119,6 @@ export default function App() {
 
     try {
       await addDoc(collection(db, 'users', currentUser.uid, 'referrals'), newRef);
-      setCopied(false);
     } catch (err) {
       console.error('Error adding referral:', err);
     }
@@ -126,21 +156,32 @@ export default function App() {
           />
         ) : (
           <div className="space-y-6 animate-in fade-in duration-200">
-            {/* Header & Simulation Trigger */}
-            <div className="flex items-center justify-between">
+            {/* Header & Simulation Triggers */}
+            <div className="flex items-center justify-between gap-2 flex-wrap">
               <div>
                 <h1 className="text-lg font-bold text-slate-900">Tenant Portal</h1>
                 <p className="text-xs text-slate-500">Authenticated Resident: {currentUser.email}</p>
               </div>
-              <button
-                type="button"
-                onClick={handleSimulateJoin}
-                className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors text-xs font-semibold flex items-center gap-1.5 border border-indigo-200 shadow-xs"
-                title="Simulate someone joining through your tenant link"
-              >
-                <UserPlus className="w-3.5 h-3.5" />
-                <span>Simulate Link Join</span>
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={handleTenantLinkJoin}
+                  disabled={resetting}
+                  className="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 transition-colors text-xs font-semibold flex items-center gap-1.5 shadow-xs disabled:opacity-50"
+                  title="Simulate someone joining through tenant link (starts every referral over)"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${resetting ? 'animate-spin' : ''}`} />
+                  <span>{resetting ? 'Restarting...' : 'Simulate Tenant Link Join (Restart)'}</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSimulateJoin}
+                  className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors text-xs font-semibold flex items-center gap-1.5 border border-indigo-200 shadow-xs"
+                >
+                  <UserPlus className="w-3.5 h-3.5" />
+                  <span>Add Referral</span>
+                </button>
+              </div>
             </div>
 
             {/* 1. Tenant Link */}
@@ -150,7 +191,7 @@ export default function App() {
                 <h2 className="text-sm font-semibold text-slate-900">Tenant Link</h2>
               </div>
               <p className="text-xs text-slate-500 mb-3">
-                Share this referral link with prospective tenants. When someone joins via your link, their details appear below securely stored in your account:
+                Share this referral link with prospective tenants. When someone joins via this link, <strong className="text-slate-800">every referral starts over</strong> with a fresh tracking session:
               </p>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <input
@@ -162,13 +203,15 @@ export default function App() {
                 <div className="flex items-center gap-2">
                   <a
                     href={tenantLink}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleTenantLinkJoin();
+                    }}
                     className="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 transition-colors flex items-center gap-1 shrink-0 justify-center"
-                    title="Open app link"
+                    title="Test joining through tenant link"
                   >
                     <ExternalLink className="w-3.5 h-3.5" />
-                    <span>Open</span>
+                    <span>Test Link</span>
                   </a>
                   <button
                     type="button"
@@ -198,7 +241,7 @@ export default function App() {
                   <Users className="w-4 h-4 text-indigo-600" />
                   <div>
                     <h2 className="text-sm font-semibold text-slate-900">Total Referrals</h2>
-                    <p className="text-[11px] text-slate-500">Users who joined via your tenant link</p>
+                    <p className="text-[11px] text-slate-500">Starts over on every tenant link join</p>
                   </div>
                 </div>
                 <span className="text-2xl font-bold font-mono text-indigo-600 tabular-nums">
@@ -220,9 +263,9 @@ export default function App() {
                 ) : joinedUsers.length === 0 ? (
                   <div className="py-10 text-center">
                     <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
-                    <p className="text-xs font-medium text-slate-700">No referrals yet</p>
+                    <p className="text-xs font-medium text-slate-700">Referrals list restarted</p>
                     <p className="text-[11px] text-slate-400 mt-0.5">
-                      Click "Simulate Link Join" above to test users joining via your link.
+                      Click "Simulate Tenant Link Join (Restart)" above to test joining through the link.
                     </p>
                   </div>
                 ) : (
