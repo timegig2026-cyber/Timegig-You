@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { BottomMenuBar } from './components/BottomMenuBar';
-import { Copy, Check, Users, Link2, UserCheck, UserPlus } from 'lucide-react';
+import { Copy, Check, Users, Link2, UserCheck, UserPlus, ExternalLink } from 'lucide-react';
 
 interface RealUser {
   login: string;
@@ -24,11 +24,12 @@ export default function App() {
   const [realUsers, setRealUsers] = useState<RealUser[]>([]);
   const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
 
-  // Tenant Link joined users state (starts empty with no pre-seeded mock users)
+  // Tenant Link joined users state
   const [joinedUsers, setJoinedUsers] = useState<Referral[]>([]);
 
-  // Tenant Link URL
-  const tenantLink = 'https://residents.portal.app/ref/tnt-84920';
+  // Construct real self-referencing tenant link using current window.location.origin
+  const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
+  const tenantLink = `${currentOrigin}/#ref=tnt-84920`;
 
   // Fetch real users from public API so users can simulate real sign-ups
   useEffect(() => {
@@ -108,32 +109,44 @@ export default function App() {
                 <h2 className="text-sm font-semibold text-slate-900">Tenant Link</h2>
               </div>
               <p className="text-xs text-slate-500 mb-3">
-                Share this referral link with prospective tenants. When someone joins via your link, their details appear below:
+                Share this referral link with prospective tenants. Clicking or opening this link directs users straight to this application:
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <input
                   type="text"
                   readOnly
                   value={tenantLink}
                   className="flex-1 px-3 py-2 text-xs sm:text-sm font-mono bg-slate-50 border border-slate-200 rounded-lg text-slate-800 focus:outline-hidden"
                 />
-                <button
-                  type="button"
-                  onClick={handleCopy}
-                  className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shrink-0"
-                >
-                  {copied ? (
-                    <>
-                      <Check className="w-3.5 h-3.5" />
-                      <span>Copied!</span>
-                    </>
-                  ) : (
-                    <>
-                      <Copy className="w-3.5 h-3.5" />
-                      <span>Copy Link</span>
-                    </>
-                  )}
-                </button>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={tenantLink}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="px-3 py-2 text-xs font-semibold rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 transition-colors flex items-center gap-1 shrink-0 justify-center"
+                    title="Open app link"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>Open</span>
+                  </a>
+                  <button
+                    type="button"
+                    onClick={handleCopy}
+                    className="px-3.5 py-2 text-xs font-semibold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors flex items-center gap-1.5 shrink-0 justify-center"
+                  >
+                    {copied ? (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Link</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
             </div>
 
