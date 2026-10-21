@@ -1,0 +1,6 @@
+{
+  "name": "Tenant Referral Portal",
+  "description": "Template application featuring a bottom menu bar with a dedicated Tenant feature icon displaying tenant links and total referrals.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
