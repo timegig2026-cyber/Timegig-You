@@ -1,13 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { BottomMenuBar } from './components/BottomMenuBar';
-import { Copy, Check, Users, Link2, UserCheck, UserPlus, ExternalLink } from 'lucide-react';
-
-interface RealUser {
-  login: string;
-  id: number;
-  avatar_url: string;
-  html_url: string;
-}
+import { AuthScreen } from './components/AuthScreen';
+import { Copy, Check, Users, Link2, UserCheck, UserPlus, ExternalLink, ShieldCheck, Lock } from 'lucide-react';
+import { auth, db } from './firebase';
+import { onAuthStateChanged, User as FirebaseUser } from 'firebase/auth';
+import { collection, addDoc, getDocs, query, orderBy, onSnapshot } from 'firebase/firestore';
 
 interface Referral {
   id: string;
@@ -16,54 +13,85 @@ interface Referral {
   avatar: string;
   date: string;
   status: 'Signed' | 'Pending';
+  userId: string;
 }
 
 export default function App() {
-  const [showTenantView, setShowTenantView] = useState<boolean>(true);
+  const [activeTab, setActiveTab] = useState<'tenant' | 'auth'>('tenant');
+  const [currentUser, setCurrentUser] = useState<FirebaseUser | null>(null);
+  const [authLoading, setAuthLoading] = useState<boolean>(true);
+
   const [copied, setCopied] = useState<boolean>(false);
-  const [realUsers, setRealUsers] = useState<RealUser[]>([]);
-  const [loadingUsers, setLoadingUsers] = useState<boolean>(true);
-
-  // Tenant Link joined users state
   const [joinedUsers, setJoinedUsers] = useState<Referral[]>([]);
+  const [loadingReferrals, setLoadingReferrals] = useState<boolean>(false);
 
-  // Construct real self-referencing tenant link using current window.location.origin
+  // Tenant Link URL
   const currentOrigin = typeof window !== 'undefined' ? window.location.origin : '';
   const tenantLink = `${currentOrigin}/#ref=tnt-84920`;
 
-  // Fetch real users from public API so users can simulate real sign-ups
+  // Listen to Firebase Auth state
   useEffect(() => {
-    fetch('https://api.github.com/users?per_page=10')
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data)) {
-          setRealUsers(data);
-        }
-        setLoadingUsers(false);
-      })
-      .catch(() => {
-        setLoadingUsers(false);
-      });
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      setCurrentUser(user);
+      setAuthLoading(false);
+      if (!user) {
+        // If user logs out, switch to auth tab
+        setActiveTab('auth');
+      }
+    });
+    return () => unsubscribe();
   }, []);
 
-  // Simulate a real user joining through the tenant link
-  const handleSimulateJoin = () => {
-    if (realUsers.length === 0) return;
-    const randomUser = realUsers[Math.floor(Math.random() * realUsers.length)];
-    const surnames = ['Smith', 'Johnson', 'Williams', 'Brown', 'Jones', 'Miller', 'Davis', 'Wilson'];
-    const randomSurname = surnames[Math.floor(Math.random() * surnames.length)];
+  // Fetch referrals from Firestore for current user
+  useEffect(() => {
+    if (!currentUser) {
+      setJoinedUsers([]);
+      return;
+    }
 
-    const newReferral: Referral = {
-      id: `${randomUser.id}-${Date.now()}`,
-      name: `${randomUser.login.charAt(0).toUpperCase() + randomUser.login.slice(1)} ${randomSurname}`,
-      email: `${randomUser.login.toLowerCase()}.${Date.now().toString().slice(-4)}@verified-tenant.org`,
-      avatar: randomUser.avatar_url,
+    setLoadingReferrals(true);
+    const refCol = collection(db, 'users', currentUser.uid, 'referrals');
+    const unsubscribe = onSnapshot(
+      refCol,
+      (snapshot) => {
+        const list: Referral[] = [];
+        snapshot.forEach((docSnap) => {
+          list.push({ id: docSnap.id, ...docSnap.data() } as Referral);
+        });
+        setJoinedUsers(list);
+        setLoadingReferrals(false);
+      },
+      (error) => {
+        console.error('Error fetching referrals:', error);
+        setLoadingReferrals(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentUser]);
+
+  // Simulate a user joining through the tenant link (saves to Firestore)
+  const handleSimulateJoin = async () => {
+    if (!currentUser) return;
+    const names = ['Alex Mercer', 'Samantha Reed', 'David Chen', 'Elena Rostova', 'Marcus Vance', 'Priya Patel'];
+    const randomName = names[Math.floor(Math.random() * names.length)];
+    const username = randomName.toLowerCase().replace(/\s+/g, '');
+
+    const newRef = {
+      userId: currentUser.uid,
+      name: randomName,
+      email: `${username}@prospect-tenant.io`,
+      avatar: `https://images.unsplash.com/photo-${1500000000000 + Math.floor(Math.random() * 999999)}?w=150&auto=format&fit=crop&q=80`,
       date: 'Just now',
-      status: 'Pending',
+      status: 'Pending' as const,
     };
 
-    setJoinedUsers([newReferral, ...joinedUsers]);
-    setCopied(false);
+    try {
+      await addDoc(collection(db, 'users', currentUser.uid, 'referrals'), newRef);
+      setCopied(false);
+    } catch (err) {
+      console.error('Error adding referral:', err);
+    }
   };
 
   const handleCopy = async () => {
@@ -79,22 +107,35 @@ export default function App() {
 
   const totalReferrals = joinedUsers.length;
 
+  if (authLoading) {
+    return (
+      <div className="min-h-screen bg-slate-50 flex items-center justify-center">
+        <div className="text-xs text-slate-500 font-medium">Loading Resident Portal...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 pb-20">
       {/* Main Content Area */}
       <main className="max-w-2xl mx-auto px-4 py-8">
-        {showTenantView ? (
-          <div className="space-y-6">
+        {activeTab === 'auth' || !currentUser ? (
+          <AuthScreen
+            currentUser={currentUser}
+            onAuthSuccess={() => setActiveTab('tenant')}
+          />
+        ) : (
+          <div className="space-y-6 animate-in fade-in duration-200">
             {/* Header & Simulation Trigger */}
             <div className="flex items-center justify-between">
               <div>
                 <h1 className="text-lg font-bold text-slate-900">Tenant Portal</h1>
-                <p className="text-xs text-slate-500">Live resident referral dashboard</p>
+                <p className="text-xs text-slate-500">Authenticated Resident: {currentUser.email}</p>
               </div>
               <button
                 type="button"
                 onClick={handleSimulateJoin}
-                className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors text-xs font-semibold flex items-center gap-1.5 border border-indigo-200"
+                className="px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-700 hover:bg-indigo-100 transition-colors text-xs font-semibold flex items-center gap-1.5 border border-indigo-200 shadow-xs"
                 title="Simulate someone joining through your tenant link"
               >
                 <UserPlus className="w-3.5 h-3.5" />
@@ -109,7 +150,7 @@ export default function App() {
                 <h2 className="text-sm font-semibold text-slate-900">Tenant Link</h2>
               </div>
               <p className="text-xs text-slate-500 mb-3">
-                Share this referral link with prospective tenants. Clicking or opening this link directs users straight to this application:
+                Share this referral link with prospective tenants. When someone joins via your link, their details appear below securely stored in your account:
               </p>
               <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
                 <input
@@ -157,7 +198,7 @@ export default function App() {
                   <Users className="w-4 h-4 text-indigo-600" />
                   <div>
                     <h2 className="text-sm font-semibold text-slate-900">Total Referrals</h2>
-                    <p className="text-[11px] text-slate-500">Users who joined via tenant link</p>
+                    <p className="text-[11px] text-slate-500">Users who joined via your tenant link</p>
                   </div>
                 </div>
                 <span className="text-2xl font-bold font-mono text-indigo-600 tabular-nums">
@@ -170,12 +211,12 @@ export default function App() {
                 <div className="text-xs font-medium text-slate-500 mb-2 flex items-center justify-between">
                   <span>Referred User Details</span>
                   <span className="text-[11px] text-indigo-600 flex items-center gap-1">
-                    <UserCheck className="w-3 h-3" /> Live
+                    <ShieldCheck className="w-3 h-3 text-emerald-600" /> Firestore Secure
                   </span>
                 </div>
 
-                {loadingUsers ? (
-                  <div className="py-8 text-center text-xs text-slate-400">Loading...</div>
+                {loadingReferrals ? (
+                  <div className="py-8 text-center text-xs text-slate-400">Loading referrals...</div>
                 ) : joinedUsers.length === 0 ? (
                   <div className="py-10 text-center">
                     <Users className="w-8 h-8 text-slate-300 mx-auto mb-2" />
@@ -215,20 +256,20 @@ export default function App() {
               </div>
             </div>
           </div>
-        ) : (
-          <div className="bg-white border border-slate-200 rounded-xl p-8 text-center my-8">
-            <Users className="w-10 h-10 text-slate-400 mx-auto mb-2" />
-            <p className="text-xs text-slate-600">
-              Click the <strong>Tenant</strong> icon on the bottom menu bar to show your tenant link and total referrals.
-            </p>
-          </div>
         )}
       </main>
 
-      {/* Non-floating Bottom Menu Bar with only 1 Feature icon called Tenant */}
+      {/* Non-floating Bottom Menu Bar with Tenant icon & Sign-Up/Login icon */}
       <BottomMenuBar
-        isActive={showTenantView}
-        onClick={() => setShowTenantView((prev) => !prev)}
+        activeTab={activeTab}
+        onTabChange={(tab) => {
+          if (tab === 'tenant' && !currentUser) {
+            setActiveTab('auth');
+          } else {
+            setActiveTab(tab);
+          }
+        }}
+        userEmail={currentUser?.email}
       />
     </div>
   );

@@ -1,0 +1,41 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with email and terms acceptance",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "termsAccepted": { "type": "boolean" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["uid", "email", "termsAccepted"]
+    },
+    "Referral": {
+      "title": "Referral",
+      "description": "Tenant referral record",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "name": { "type": "string", "maxLength": 100 },
+        "email": { "type": "string", "format": "email" },
+        "avatar": { "type": "string" },
+        "date": { "type": "string" },
+        "status": { "type": "string", "enum": ["Signed", "Pending"] }
+      },
+      "required": ["id", "userId", "name", "email", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profile documents"
+    },
+    "/users/{userId}/referrals/{referralId}": {
+      "schema": "Referral",
+      "description": "Referrals created by the user"
+    }
+  }
+}
